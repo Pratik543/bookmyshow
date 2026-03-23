@@ -1,27 +1,32 @@
-# Use Node.js 18 (or your Jenkins-configured version)
-FROM node:18
+# Stage 1: Build the application
+FROM node:18-alpine AS builder
 
-# Set working directory
+# Set the working directory
 WORKDIR /app
 
-# Copy package.json and package-lock.json
+# Copy only the dependency files first to leverage Docker layer caching
 COPY package.json package-lock.json ./
 
-# Force install a compatible PostCSS version to fix the issue
-RUN npm install postcss@8.4.21 postcss-safe-parser@6.0.0 --legacy-peer-deps
+# Install dependencies cleanly
+RUN npm ci
 
-# Install dependencies
-RUN npm install
-
-# Copy the entire project
+# Copy the rest of the application code
 COPY . .
 
-# Expose port 3000
-EXPOSE 3000
+# Build the React application (Vite uses 'build' directory as per vite.config.js)
+RUN npm run build
 
-# Set environment variable to prevent OpenSSL errors
-ENV NODE_OPTIONS=--openssl-legacy-provider
-ENV PORT=3000
+# Stage 2: Serve the application using a lightweight web server
+FROM nginx:alpine
 
-# Start the application
-CMD ["npm", "start"]
+# Remove default nginx static assets
+RUN rm -rf /usr/share/nginx/html/*
+
+# Copy built assets from builder stage
+COPY --from=builder /app/build /usr/share/nginx/html
+
+# Expose port 80 to the outside
+EXPOSE 80
+
+# Start nginx in the foreground
+CMD ["nginx", "-g", "daemon off;"]
